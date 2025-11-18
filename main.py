@@ -1,6 +1,10 @@
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from typing import List, Optional
+
+from schemas import Lead
+from database import create_document, get_documents, db
 
 app = FastAPI()
 
@@ -33,9 +37,6 @@ def test_database():
     }
     
     try:
-        # Try to import database module
-        from database import db
-        
         if db is not None:
             response["database"] = "✅ Available"
             response["database_url"] = "✅ Configured"
@@ -52,17 +53,42 @@ def test_database():
         else:
             response["database"] = "⚠️  Available but not initialized"
             
-    except ImportError:
-        response["database"] = "❌ Database module not found (run enable-database first)"
     except Exception as e:
         response["database"] = f"❌ Error: {str(e)[:50]}"
     
     # Check environment variables
-    import os
     response["database_url"] = "✅ Set" if os.getenv("DATABASE_URL") else "❌ Not Set"
     response["database_name"] = "✅ Set" if os.getenv("DATABASE_NAME") else "❌ Not Set"
     
     return response
+
+# ----- Lead capture endpoints -----
+@app.post("/api/leads")
+def create_lead(lead: Lead):
+    """Capture a lead from the website and store it in the database"""
+    try:
+        lead_id = create_document("lead", lead)
+        return {"status": "success", "id": lead_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/leads")
+def list_leads(limit: Optional[int] = 20):
+    """List leads (for quick verification). Limited by default."""
+    try:
+        docs = get_documents("lead", limit=limit)
+        # Convert ObjectId to string for JSON serialization
+        for d in docs:
+            if "_id" in d:
+                d["_id"] = str(d["_id"])
+            # Convert datetimes to isoformat
+            if "created_at" in d and hasattr(d["created_at"], "isoformat"):
+                d["created_at"] = d["created_at"].isoformat()
+            if "updated_at" in d and hasattr(d["updated_at"], "isoformat"):
+                d["updated_at"] = d["updated_at"].isoformat()
+        return {"items": docs}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
